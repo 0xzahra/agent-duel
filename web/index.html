@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agent Duel – free sealed-prediction scoreboard on Base</title>
+<style>
+:root{--bg:#0e1116;--card:#161b22;--line:#30363d;--fg:#e6edf3;--mut:#8b949e;--acc:#2f81f7;--ok:#3fb950;--warn:#d29922;--bad:#f85149}
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:var(--bg);color:var(--fg);line-height:1.45}
+main{max-width:760px;margin:0 auto;padding:1rem}
+h1{margin:.2rem 0}h2{margin:1.6rem 0 .5rem;font-size:1.15rem}
+.sub,.note{color:var(--mut);font-size:.88rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:.9rem;margin:.6rem 0}
+.free{border-color:var(--ok)}
+code,.mono{font-family:ui-monospace,Menlo,monospace;font-size:.82rem;word-break:break-all}
+label{display:block;margin:.5rem 0 .15rem;font-size:.85rem;color:var(--mut)}
+input,textarea,select{width:100%;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:.6rem;font-size:1rem}
+input[type=checkbox]{width:auto}
+button{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:.65rem 1rem;font-size:1rem;cursor:pointer;margin:.4rem .4rem .2rem 0;min-height:44px}
+button.sec{background:#30363d}button:disabled{opacity:.5;cursor:default}
+.row{display:flex;gap:.6rem;flex-wrap:wrap}.row>div{flex:1 1 150px}
+.pill{display:inline-block;border-radius:10px;padding:1px 9px;font-size:.75rem;background:#30363d;margin-right:.3rem}
+.pill.g{background:#238636}.pill.w{background:#9e6a03}.pill.b{background:#da3633}
+table{width:100%;border-collapse:collapse}td,th{padding:.4rem .3rem;border-bottom:1px solid var(--line);text-align:left;font-size:.88rem}
+.table-wrap{overflow-x:auto}
+#status,#txstatus{color:var(--warn);font-size:.9rem;min-height:1.2em;word-break:break-word}
+details{margin:.4rem 0}summary{cursor:pointer}
+.act{border-top:1px dashed var(--line);margin-top:.6rem;padding-top:.4rem}
+pre{white-space:pre-wrap;word-break:break-all;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:.6rem;font-size:.8rem}
+a{color:#79c0ff}
+</style></head><body><main>
+<h1>⚔️ Agent Duel</h1>
+<p class="sub">A free scoreboard on Base. Two players seal a secret prediction, reveal it later, and the question's creator posts the answer. Wins, losses and draws are recorded publicly.</p>
+
+<div class="card free"><b>Free to use.</b> There is no money involved: no stakes, no prizes, no token, no payments to anyone. The only cost is the tiny network (gas) fee on Base that your wallet charges for each action. Reading the scoreboard needs no wallet.</div>
+
+<details class="card"><summary><b>How it works (plain English)</b></summary>
+<ol>
+<li><b>Create a question</b> – someone (the <i>resolver</i>) asks a question whose answer is a number from 0 to 255 (for example 1 = Yes, 0 = No). They set two deadlines: when sealing ends, and when revealing ends. The resolver cannot play their own question.</li>
+<li><b>Commit</b> – the first two other wallets to commit are the two duelists. You pick your number; the page makes a random secret "salt" and sends only a scrambled fingerprint (hash) to the chain, so nobody can see your pick. <b>Save your reveal note</b> – without it you cannot reveal.</li>
+<li><b>Reveal</b> – once both have committed (or the commit deadline passes) and before the reveal deadline, each duelist reveals their number and salt. The chain checks it matches.</li>
+<li><b>Resolve</b> – after both revealed (or the reveal deadline passed), the resolver posts the real outcome. Only a revealed number equal to the outcome counts as right. One right + one not = win/loss. Both right or both not = draw.</li>
+</ol>
+<p class="note">Some questions require a minimum IMD balance or an Identity.md NFT to commit. Those are only read, never spent. This is informational only.</p></details>
+
+<h2>Wallet</h2>
+<div class="card">
+<button id="connect">Connect wallet</button>
+<div id="who" class="note">Not connected. Needs a browser wallet (MetaMask, Coinbase Wallet, Rabby…). You'll be asked to switch to Base (chain 8453).</div>
+<div id="txstatus"></div>
+</div>
+
+<h2>Scoreboard</h2>
+<div class="card table-wrap"><table id="board"><thead><tr><th>#</th><th>Address</th><th>W</th><th>L</th><th>D</th><th>Identity.md</th><th>IMD</th></tr></thead><tbody><tr><td colspan="7">Loading…</td></tr></tbody></table></div>
+<label>Look up any address (IMD balance / Identity.md badge)</label>
+<div class="row"><div><input id="lookup" placeholder="0x…"></div><div style="flex:0 0 auto"><button id="lookupBtn" class="sec">Look up</button></div></div>
+<div id="lookupOut" class="note"></div>
+
+<h2>Questions</h2>
+<div id="status">Loading…</div>
+<div id="qs"></div>
+
+<h2>Create a question</h2>
+<div class="card" id="createCard">
+<label>Question (anyone can read it)</label>
+<input id="qtext" maxlength="280" placeholder="e.g. Will it rain in Lagos on Friday? (1 = yes, 0 = no)">
+<div class="row"><div><label>Commits close (your local time)</label><input id="cdl" type="datetime-local"></div>
+<div><label>Reveals close (must be later)</label><input id="rdl" type="datetime-local"></div></div>
+<div class="row"><div><label>Min IMD balance to commit (0 = none)</label><input id="minImd" inputmode="decimal" value="0"></div>
+<div><label>Require Identity.md NFT?</label><select id="reqSeat"><option value="0">No</option><option value="1">Yes</option></select></div></div>
+<p class="note">You (the connected wallet) become the resolver and cannot play this question.</p>
+<button id="createBtn">Create question</button>
+</div>
+
+<h2>My saved reveal notes</h2>
+<div id="notes" class="card note">None yet.</div>
+
+<p class="note">Contract <code id="caddr"></code> on Base · <a id="scan" target="_blank" rel="noopener">view on Basescan</a>. No admin, no upgrades, no payable functions. Informational only – not advice.</p>
+</main>
+<script src="ethers.umd.min.js"></script>
+<script src="duel-lib.js"></script>
+<script>
+(function(){
+const CONTRACT="0xAAa9DED4E50Ca82E3C32444EA836940612a9FB96", FROM_BLOCK=52475733, CHAIN_ID=8453;
+const RPCS=["https://mainnet.base.org","https://base-rpc.publicnode.com","https://base.llamarpc.com"];
+const ABI=[
+"event QuestionCreated(uint256 indexed id,address indexed resolver,string text,uint64 commitDeadline,uint64 revealDeadline,uint256 minImd,bool requireSeat)",
+"event Result(uint256 indexed id,address indexed player,uint8 result)",
+"function questionCount() view returns (uint256)",
+"function questions(uint256) view returns (address resolver,uint64 commitDeadline,uint64 revealDeadline,uint256 minImd,bool requireSeat,bool resolved,uint8 outcome,uint8 count)",
+"function players(uint256,uint256) view returns (address)",
+"function entries(uint256,address) view returns (bytes32 commitment,bool revealed,uint8 prediction)",
+"function scoreboard(address) view returns (uint32,uint32,uint32,uint256,bool)",
+"function createQuestion(string text,uint64 commitDeadline,uint64 revealDeadline,uint256 minImd,bool requireSeat) returns (uint256)",
+"function commit(uint256 id,bytes32 commitment)",
+"function reveal(uint256 id,uint8 prediction,bytes32 salt)",
+"function resolve(uint256 id,uint8 outcome)"];
+const $=s=>document.querySelector(s);
+const esc=t=>String(t).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const short=a=>a.slice(0,6)+"…"+a.slice(-4);
+const Z="0x0000000000000000000000000000000000000000";
+$("#caddr").textContent=CONTRACT;$("#scan").href="https://basescan.org/address/"+CONTRACT;
+let ro=null,roIdx=0;
+function reader(){const p=new ethers.JsonRpcProvider(RPCS[roIdx],CHAIN_ID,{staticNetwork:true});return new ethers.Contract(CONTRACT,ABI,p);}
+async function withRpc(fn){let err;for(let i=0;i<RPCS.length;i++){try{ro=ro||reader();return await fn(ro);}catch(e){err=e;roIdx=(roIdx+1)%RPCS.length;ro=null;}}throw err;}
+let signer=null,me=null;
+const NK="agentduel.notes.v1";
+const notes=()=>{try{return JSON.parse(localStorage.getItem(NK)||"[]")}catch{return[]}};
+const saveNote=n=>{const a=notes().filter(x=>!(x.id==n.id&&x.player.toLowerCase()==n.player.toLowerCase()));a.push(n);localStorage.setItem(NK,JSON.stringify(a));renderNotes();};
+const findNote=(id,who)=>notes().find(x=>String(x.id)==String(id)&&x.player.toLowerCase()==String(who).toLowerCase());
+const tx=m=>$("#txstatus").textContent=m;
+function fmtT(s){return new Date(Number(s)*1000).toLocaleString()}
+function fmtImd(v){const n=Number(ethers.formatUnits(v,18));return n.toLocaleString(undefined,{maximumFractionDigits:2})}
+
+// ---------- reading ----------
+async function getEvents(c,filter,from,head){
+  const out=[];let step=100000;let s=from;
+  while(s<=head){const e=Math.min(s+step-1,head);
+    try{out.push(...await c.queryFilter(filter,s,e));s=e+1;}
+    catch(err){if(step<=2000)throw err;step=Math.floor(step/4);}}
+  return out;
+}
+let QCACHE=null;
+async function loadAll(){
+  $("#status").textContent="Loading from Base…";
+  try{
+    const data=await withRpc(async c=>{
+      const n=Number(await c.questionCount());
+      const head=await c.runner.provider.getBlockNumber();
+      const [qe,re]=await Promise.all([getEvents(c,c.filters.QuestionCreated(),FROM_BLOCK,head),getEvents(c,c.filters.Result(),FROM_BLOCK,head)]);
+      const text={};qe.forEach(e=>text[e.args.id.toString()]=e.args.text);
+      const qs=[];
+      for(let i=n;i>=1&&i>n-30;i--){
+        const q=await c.questions(i);const pl=[];
+        for(let k=0;k<Number(q.count);k++){const a=await c.players(i,k);const en=await c.entries(i,a);pl.push({a,revealed:en.revealed,prediction:Number(en.prediction)});}
+        qs.push({id:i,text:text[i]||"(text unavailable)",q,pl});
+      }
+      const addrs=[...new Set(re.map(e=>e.args.player))];
+      const rows=await Promise.all(addrs.map(async a=>{const r=await c.scoreboard(a);return{a,w:Number(r[0]),l:Number(r[1]),d:Number(r[2]),imd:r[3],seat:r[4]}}));
+      rows.sort((a,b)=>b.w-a.w||a.l-b.l||b.d-a.d);
+      const now=(await c.runner.provider.getBlock("latest")).timestamp;
+      return{n,qs,rows,now};
+    });
+    QCACHE=data;renderBoard(data.rows);renderQs(data);
+    $("#status").textContent=data.n?"":"No questions yet – be the first to create one below.";
+  }catch(e){$("#status").textContent="Could not load from Base: "+(e.shortMessage||e.message)+" (try refreshing)";}
+}
+function renderBoard(rows){
+  $("#board tbody").innerHTML=rows.map((r,i)=>`<tr><td>${i+1}</td><td class="mono">${esc(short(r.a))}</td><td>${r.w}</td><td>${r.l}</td><td>${r.d}</td><td>${r.seat?'<span class="pill g">holder</span>':"–"}</td><td>${fmtImd(r.imd)}</td></tr>`).join("")||'<tr><td colspan="7">No settled duels yet.</td></tr>';
+}
+function phase(q,now,pl){
+  const both=Number(q.count)==2&&pl.every(p=>p.revealed);
+  if(q.resolved)return{k:"resolved",t:"Resolved – outcome "+q.outcome,c:"g"};
+  if(Number(q.count)<2&&now<Number(q.commitDeadline))return{k:"commit",t:`Open for commits (${q.count}/2)`,c:"g"};
+  if(now<Number(q.revealDeadline)){return both?{k:"resolvable",t:"Both revealed – awaiting resolver",c:"w"}:{k:"reveal",t:"Reveal phase",c:"w"};}
+  if(Number(q.count)<2)return{k:"resolvable",t:"Reveal ended – void (needs resolver to close)",c:"b"};
+  return{k:"resolvable",t:"Reveal ended – awaiting resolver",c:"w"};
+}
+function renderQs(d){
+  $("#qs").innerHTML=d.qs.map(({id,text,q,pl})=>{
+    const ph=phase(q,d.now,pl);
+    const gate=[q.minImd>0n?`≥${fmtImd(q.minImd)} IMD`:"",q.requireSeat?"Identity.md":""].filter(Boolean).join(" + ")||"open to all";
+    const plHtml=pl.map(p=>`<div class="mono">${esc(short(p.a))} – ${p.revealed?"revealed: <b>"+p.prediction+"</b>":"sealed"}</div>`).join("")||'<div class="note">No players yet.</div>';
+    return `<div class="card" data-id="${id}"><div><span class="pill ${ph.c}">${esc(ph.t)}</span><span class="pill">#${id}</span><span class="pill">${esc(gate)}</span></div>
+<p style="margin:.5rem 0"><b>${esc(text)}</b></p>
+<div class="note">Resolver <span class="mono">${esc(short(q.resolver))}</span><br>Commits close: ${fmtT(q.commitDeadline)}<br>Reveals close: ${fmtT(q.revealDeadline)}</div>${plHtml}
+<div class="act" data-phase="${ph.k}"></div></div>`}).join("");
+  renderActions();
+}
+function renderActions(){
+  if(!QCACHE)return;
+  document.querySelectorAll("#qs .card").forEach(card=>{
+    const id=Number(card.dataset.id);const item=QCACHE.qs.find(x=>x.id===id);const{q,pl}=item;const box=card.querySelector(".act");
+    const ph=phase(q,QCACHE.now,pl).k;
+    if(!me){box.innerHTML='<span class="note">Connect your wallet to take part.</span>';return;}
+    const isRes=q.resolver.toLowerCase()==me.toLowerCase();
+    const mine=pl.find(p=>p.a.toLowerCase()==me.toLowerCase());
+    let h="";
+    if(ph==="commit"){
+      if(isRes)h='<span class="note">You created this question, so you can\'t play it.</span>';
+      else if(mine)h='<span class="note">You have committed. Come back for the reveal phase.</span>';
+      else h=`<label>Your prediction (whole number 0–255, e.g. 1 = yes, 0 = no)</label><input class="pred" inputmode="numeric" placeholder="1"><button class="commitBtn">Seal &amp; commit</button><div class="out"></div>`;
+    } else if(ph==="reveal"){
+      if(mine&&!mine.revealed){const n=findNote(id,me);
+        h=`<label>Reveal note (auto-filled if saved in this browser; otherwise paste it)</label><textarea class="notein" rows="5">${n?esc(ethers_note(n)):""}</textarea><button class="revealBtn">Reveal</button><div class="out"></div>`;}
+      else if(mine)h='<span class="note">You have revealed. Waiting for the resolver.</span>';
+      else h='<span class="note">Only the two duelists can reveal.</span>';
+    }
+    if((ph==="reveal"||ph==="resolvable")&&isRes&&!q.resolved){
+      const allowed=ph==="resolvable";
+      h+=allowed?`<label>Real outcome (number 0–255)</label><input class="outc" inputmode="numeric"><button class="resolveBtn">Resolve</button><div class="out"></div>`:'<div class="note">As resolver you can resolve once both have revealed or the reveal deadline passes.</div>';
+    }
+    box.innerHTML=h||'<span class="note">Nothing for you to do here.</span>';
+  });
+}
+function ethers_note(n){return DuelLib.buildNote(n)}
+function renderNotes(){
+  const a=notes();
+  $("#notes").innerHTML=a.length?a.map(n=>`<div style="margin-bottom:.8rem"><b>Question #${esc(n.id)}</b> · prediction ${esc(n.prediction)} · wallet <span class="mono">${esc(short(n.player))}</span><br><button class="sec cp" data-i="${a.indexOf(n)}">Copy</button><button class="sec dl" data-i="${a.indexOf(n)}">Download</button></div>`).join(""):"None yet. When you commit, your note is saved here and in a file you can download.";
+}
+// ---------- wallet ----------
+async function connect(){
+  if(!window.ethereum){tx("No wallet found. Install MetaMask or Coinbase Wallet (or open this page in your wallet's browser).");return;}
+  try{
+    await window.ethereum.request({method:"eth_requestAccounts"});
+    await ensureBase();
+    const bp=new ethers.BrowserProvider(window.ethereum);signer=await bp.getSigner();me=await signer.getAddress();
+    $("#connect").textContent="Connected";
+    const info=await withRpc(c=>c.scoreboard(me));
+    $("#who").innerHTML=`Connected: <span class="mono">${esc(me)}</span><br>IMD balance: <b>${fmtImd(info[3])}</b> · Identity.md: ${info[4]?'<span class="pill g">holder</span>':"not a holder"} · record ${info[0]}W / ${info[1]}L / ${info[2]}D`;
+    tx("");renderActions();
+  }catch(e){tx("Wallet error: "+(e.shortMessage||e.message));}
+}
+async function ensureBase(){
+  const hex="0x"+CHAIN_ID.toString(16);
+  const cur=await window.ethereum.request({method:"eth_chainId"});if(cur===hex)return;
+  try{await window.ethereum.request({method:"wallet_switchEthereumChain",params:[{chainId:hex}]});}
+  catch(e){if(e.code===4902||(e.data&&e.data.originalError&&e.data.originalError.code===4902)){
+    await window.ethereum.request({method:"wallet_addEthereumChain",params:[{chainId:hex,chainName:"Base",nativeCurrency:{name:"Ether",symbol:"ETH",decimals:18},rpcUrls:["https://mainnet.base.org"],blockExplorerUrls:["https://basescan.org"]}]});}else throw e;}
+}
+async function writer(){await ensureBase();const bp=new ethers.BrowserProvider(window.ethereum);signer=await bp.getSigner();return new ethers.Contract(CONTRACT,ABI,signer);}
+async function send(label,fn,out){
+  try{tx(label+" – confirm in your wallet…");const c=await writer();const t=await fn(c);tx("Sent. Waiting for confirmation… "+t.hash);await t.wait();tx("Done ✔ "+label+". Refreshing…");await loadAll();return true;}
+  catch(e){const m=e.reason||e.shortMessage||e.message;tx("Failed: "+m);if(out)out.textContent="Failed: "+m;return false;}
+}
+const u8=v=>{if(!/^\d{1,3}$/.test(String(v).trim())||Number(v)>255)throw new Error("Enter a whole number from 0 to 255.");return Number(v);};
+function toUnix(v){if(!v)throw new Error("Pick both dates.");return Math.floor(new Date(v).getTime()/1000);}
+// ---------- events ----------
+$("#connect").onclick=connect;
+if(window.ethereum){window.ethereum.on&&window.ethereum.on("accountsChanged",()=>location.reload());window.ethereum.on&&window.ethereum.on("chainChanged",()=>location.reload());}
+$("#lookupBtn").onclick=async()=>{const a=$("#lookup").value.trim();const o=$("#lookupOut");
+  if(!ethers.isAddress(a)){o.textContent="Enter a valid 0x address.";return;}
+  try{const r=await withRpc(c=>c.scoreboard(a));o.innerHTML=`IMD: <b>${fmtImd(r[3])}</b> · Identity.md: ${r[4]?"holder ✔":"no"} · ${r[0]}W / ${r[1]}L / ${r[2]}D`;}catch(e){o.textContent="Lookup failed: "+(e.shortMessage||e.message);}};
+$("#createBtn").onclick=async()=>{
+  if(!me){tx("Connect your wallet first.");return;}
+  try{
+    const text=$("#qtext").value.trim();if(!text)throw new Error("Write the question.");
+    const cd=toUnix($("#cdl").value),rd=toUnix($("#rdl").value);
+    if(cd<=Date.now()/1000)throw new Error("Commit deadline must be in the future.");
+    if(rd<=cd)throw new Error("Reveal deadline must be after the commit deadline.");
+    const imd=ethers.parseUnits($("#minImd").value||"0",18),seat=$("#reqSeat").value==="1";
+    await send("Create question",c=>c.createQuestion(text,cd,rd,imd,seat));
+  }catch(e){tx(e.message);}
+};
+document.addEventListener("click",async ev=>{
+  const b=ev.target;
+  if(b.classList.contains("cp")||b.classList.contains("dl")){const n=notes()[b.dataset.i];const t=DuelLib.buildNote(n);
+    if(b.classList.contains("cp")){try{await navigator.clipboard.writeText(t);b.textContent="Copied";}catch{prompt("Copy:",t)}}else download(n,t);return;}
+  const card=b.closest(".card[data-id]");if(!card)return;const id=Number(card.dataset.id);const out=card.querySelector(".out");
+  if(b.classList.contains("commitBtn")){
+    try{const pred=u8(card.querySelector(".pred").value);const salt=DuelLib.randomSalt();
+      const h=DuelLib.commitmentHash(id,pred,salt,me);
+      const note={contract:CONTRACT,chainId:CHAIN_ID,id,player:me,prediction:pred,salt,commitment:h};
+      saveNote(note); // save BEFORE sending, so it can't be lost
+      const t=DuelLib.buildNote(note);
+      out.innerHTML=`<p><b>Save this reveal note now.</b> You need it to reveal; it is also saved in this browser.</p><pre>${esc(t)}</pre><button class="sec cp2">Copy</button><button class="sec dl2">Download</button>`;
+      out.querySelector(".cp2").onclick=async e=>{try{await navigator.clipboard.writeText(t);e.target.textContent="Copied"}catch{prompt("Copy:",t)}};
+      out.querySelector(".dl2").onclick=()=>download(note,t);
+      const ok=await send("Commit",c=>c.commit(id,h),null);
+      if(!ok)out.insertAdjacentHTML("afterbegin",'<p class="note">The commit did not go through; the note below is not active yet.</p>');
+    }catch(e){out.textContent=e.message;}
+  }
+  if(b.classList.contains("revealBtn")){
+    try{const n=DuelLib.parseNote(card.querySelector(".notein").value);if(!n)throw new Error("Could not read the note. Paste the full note.");
+      if(String(n.id)!==String(id))throw new Error("This note is for question #"+n.id+".");
+      await send("Reveal",c=>c.reveal(id,u8(n.prediction),n.salt),out);
+    }catch(e){out.textContent=e.message;}
+  }
+  if(b.classList.contains("resolveBtn")){
+    try{const o=u8(card.querySelector(".outc").value);await send("Resolve",c=>c.resolve(id,o),out);}catch(e){out.textContent=e.message;}
+  }
+});
+function download(n,t){const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([t],{type:"text/plain"}));a.download=`agent-duel-q${n.id}-reveal-note.txt`;document.body.appendChild(a);a.click();a.remove();}
+// default dates: +1h / +2h
+(function(){const f=h=>{const d=new Date(Date.now()+h*3600e3);d.setMinutes(d.getMinutes()-d.getTimezoneOffset());return d.toISOString().slice(0,16)};$("#cdl").value=f(24);$("#rdl").value=f(48);})();
+renderNotes();loadAll();
+})();
+</script></body></html>
