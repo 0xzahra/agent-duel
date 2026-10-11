@@ -69,3 +69,7 @@ Afterwards edit `DEPLOYED` and `FROM_BLOCK` (deployment block, important so the 
 
 ## Disclaimer
 Informational only. Not financial advice, no wagering, no payouts.
+
+## Use it
+
+Open `web/index.html` via GitHub Pages, or locally in a browser. Connect a wallet on Base. It is free except for gas.
