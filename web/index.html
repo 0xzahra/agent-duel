@@ -81,7 +81,10 @@ a{color:#79c0ff}
 <script>
 (function(){
 const CONTRACT="0xAAa9DED4E50Ca82E3C32444EA836940612a9FB96", FROM_BLOCK=52475733, CHAIN_ID=8453;
-const RPCS=["https://mainnet.base.org","https://base-rpc.publicnode.com","https://base.llamarpc.com"];
+// Read-only RPCs (all send Access-Control-Allow-Origin). Order = preference for eth_call.
+const RPCS=["https://mainnet.base.org","https://base-rpc.publicnode.com","https://1rpc.io/base","https://base.drpc.org","https://base.gateway.tenderly.co","https://base.meowrpc.com"];
+// eth_getLogs is restricted on most free endpoints; these accept small block ranges.
+const LOG_RPCS=[["https://base.gateway.tenderly.co",1000],["https://mainnet.base.org",1000],["https://base.drpc.org",1000],["https://1rpc.io/base",50]];
 const ABI=[
 "event QuestionCreated(uint256 indexed id,address indexed resolver,string text,uint64 commitDeadline,uint64 revealDeadline,uint256 minImd,bool requireSeat)",
 "event Result(uint256 indexed id,address indexed player,uint8 result)",
@@ -100,7 +103,7 @@ const short=a=>a.slice(0,6)+"…"+a.slice(-4);
 const Z="0x0000000000000000000000000000000000000000";
 $("#caddr").textContent=CONTRACT;$("#scan").href="https://basescan.org/address/"+CONTRACT;
 let ro=null,roIdx=0;
-function reader(){const p=new ethers.JsonRpcProvider(RPCS[roIdx],CHAIN_ID,{staticNetwork:true});return new ethers.Contract(CONTRACT,ABI,p);}
+function reader(){const p=new ethers.JsonRpcProvider(RPCS[roIdx],CHAIN_ID,{staticNetwork:true,batchMaxCount:1});return new ethers.Contract(CONTRACT,ABI,p);}
 async function withRpc(fn){let err;for(let i=0;i<RPCS.length;i++){try{ro=ro||reader();return await fn(ro);}catch(e){err=e;roIdx=(roIdx+1)%RPCS.length;ro=null;}}throw err;}
 let signer=null,me=null;
 const NK="agentduel.notes.v1";
@@ -112,11 +115,22 @@ function fmtT(s){return new Date(Number(s)*1000).toLocaleString()}
 function fmtImd(v){const n=Number(ethers.formatUnits(v,18));return n.toLocaleString(undefined,{maximumFractionDigits:2})}
 
 // ---------- reading ----------
+const LOGP={};
+function logProv(u){return LOGP[u]||(LOGP[u]=new ethers.JsonRpcProvider(u,CHAIN_ID,{staticNetwork:true,batchMaxCount:1}));}
+async function logsRange(filter,s,e){
+  let err;
+  for(const [u,max] of LOG_RPCS){
+    if(e-s+1>max)continue;
+    try{return await new ethers.Contract(CONTRACT,ABI,logProv(u)).queryFilter(filter,s,e);}catch(x){err=x;}
+  }
+  throw err||new Error("no log RPC for range");
+}
 async function getEvents(c,filter,from,head){
-  const out=[];let step=100000;let s=from;
-  while(s<=head){const e=Math.min(s+step-1,head);
-    try{out.push(...await c.queryFilter(filter,s,e));s=e+1;}
-    catch(err){if(step<=2000)throw err;step=Math.floor(step/4);}}
+  const step=1000,ranges=[];
+  for(let s=from;s<=head;s+=step)ranges.push([s,Math.min(s+step-1,head)]);
+  const out=[];let i=0;
+  async function worker(){while(i<ranges.length){const [s,e]=ranges[i++];out.push(...await logsRange(filter,s,e));}}
+  await Promise.all(Array.from({length:4},worker));
   return out;
 }
 let QCACHE=null;
@@ -126,7 +140,9 @@ async function loadAll(){
     const data=await withRpc(async c=>{
       const n=Number(await c.questionCount());
       const head=await c.runner.provider.getBlockNumber();
-      const [qe,re]=await Promise.all([getEvents(c,c.filters.QuestionCreated(),FROM_BLOCK,head),getEvents(c,c.filters.Result(),FROM_BLOCK,head)]);
+      let qe=[],re=[];
+      try{[qe,re]=await Promise.all([getEvents(c,c.filters.QuestionCreated(),FROM_BLOCK,head),getEvents(c,c.filters.Result(),FROM_BLOCK,head)]);}
+      catch(e){console.warn("event logs unavailable",e);}
       const text={};qe.forEach(e=>text[e.args.id.toString()]=e.args.text);
       const qs=[];
       for(let i=n;i>=1&&i>n-30;i--){
@@ -134,7 +150,7 @@ async function loadAll(){
         for(let k=0;k<Number(q.count);k++){const a=await c.players(i,k);const en=await c.entries(i,a);pl.push({a,revealed:en.revealed,prediction:Number(en.prediction)});}
         qs.push({id:i,text:text[i]||"(text unavailable)",q,pl});
       }
-      const addrs=[...new Set(re.map(e=>e.args.player))];
+      const addrs=[...new Set([...re.map(e=>e.args.player),...qs.flatMap(x=>x.pl.map(p=>p.a))])];
       const rows=await Promise.all(addrs.map(async a=>{const r=await c.scoreboard(a);return{a,w:Number(r[0]),l:Number(r[1]),d:Number(r[2]),imd:r[3],seat:r[4]}}));
       rows.sort((a,b)=>b.w-a.w||a.l-b.l||b.d-a.d);
       const now=(await c.runner.provider.getBlock("latest")).timestamp;
