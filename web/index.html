@@ -11,6 +11,7 @@ h1{margin:.2rem 0}h2{margin:1.6rem 0 .5rem;font-size:1.15rem}
 .sub,.note{color:var(--mut);font-size:.88rem}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:.9rem;margin:.6rem 0}
 .free{border-color:var(--ok)}
+.sponsor{border-color:var(--acc)}.sponsor a{color:var(--acc)}
 code,.mono{font-family:ui-monospace,Menlo,monospace;font-size:.82rem;word-break:break-all}
 label{display:block;margin:.5rem 0 .15rem;font-size:.85rem;color:var(--mut)}
 input,textarea,select{width:100%;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:.6rem;font-size:1rem}
@@ -74,6 +75,12 @@ a{color:#79c0ff}
 <h2>My saved reveal notes</h2>
 <div id="notes" class="card note">None yet.</div>
 
+<div class="card sponsor" id="sponsor">
+<h2 style="margin-top:0">Sponsor this scoreboard</h2>
+<p>Sponsor Agent Duel: put your project in front of onchain predictors. One sponsor slot per week.</p>
+<p class="note"><a href="https://x.com/ArewaOS26" target="_blank" rel="noopener">DM @ArewaOS26 on X</a> to ask about the slot.</p>
+</div>
+
 <p class="note">Contract <code id="caddr"></code> on Base · <a id="scan" target="_blank" rel="noopener">view on Basescan</a>. No admin, no upgrades, no payable functions. Informational only – not advice.</p>
 </main>
 <script src="ethers.umd.min.js"></script>
@@ -98,7 +105,7 @@ const ABI=[
 "function reveal(uint256 id,uint8 prediction,bytes32 salt)",
 "function resolve(uint256 id,uint8 outcome)"];
 const $=s=>document.querySelector(s);
-const esc=t=>String(t).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const esc=t=>String(t).replace(/[&<>"']/g,c=>({"&":"&","<":"<",">":">",'"':""","'":"&#39;"}[c]));
 const short=a=>a.slice(0,6)+"…"+a.slice(-4);
 const Z="0x0000000000000000000000000000000000000000";
 $("#caddr").textContent=CONTRACT;$("#scan").href="https://basescan.org/address/"+CONTRACT;
@@ -194,7 +201,7 @@ function renderActions(){
     if(ph==="commit"){
       if(isRes)h='<span class="note">You created this question, so you can\'t play it.</span>';
       else if(mine)h='<span class="note">You have committed. Come back for the reveal phase.</span>';
-      else h=`<label>Your prediction (whole number 0–255, e.g. 1 = yes, 0 = no)</label><input class="pred" inputmode="numeric" placeholder="1"><button class="commitBtn">Seal &amp; commit</button><div class="out"></div>`;
+      else h=`<label>Your prediction (whole number 0–255, e.g. 1 = yes, 0 = no)</label><input class="pred" inputmode="numeric" placeholder="1"><button class="commitBtn">Seal & commit</button><div class="out"></div>`;
     } else if(ph==="reveal"){
       if(mine&&!mine.revealed){const n=findNote(id,me);
         h=`<label>Reveal note (auto-filled if saved in this browser; otherwise paste it)</label><textarea class="notein" rows="5">${n?esc(ethers_note(n)):""}</textarea><button class="revealBtn">Reveal</button><div class="out"></div>`;}
@@ -250,44 +257,4 @@ $("#createBtn").onclick=async()=>{
   if(!me){tx("Connect your wallet first.");return;}
   try{
     const text=$("#qtext").value.trim();if(!text)throw new Error("Write the question.");
-    const cd=toUnix($("#cdl").value),rd=toUnix($("#rdl").value);
-    if(cd<=Date.now()/1000)throw new Error("Commit deadline must be in the future.");
-    if(rd<=cd)throw new Error("Reveal deadline must be after the commit deadline.");
-    const imd=ethers.parseUnits($("#minImd").value||"0",18),seat=$("#reqSeat").value==="1";
-    await send("Create question",c=>c.createQuestion(text,cd,rd,imd,seat));
-  }catch(e){tx(e.message);}
-};
-document.addEventListener("click",async ev=>{
-  const b=ev.target;
-  if(b.classList.contains("cp")||b.classList.contains("dl")){const n=notes()[b.dataset.i];const t=DuelLib.buildNote(n);
-    if(b.classList.contains("cp")){try{await navigator.clipboard.writeText(t);b.textContent="Copied";}catch{prompt("Copy:",t)}}else download(n,t);return;}
-  const card=b.closest(".card[data-id]");if(!card)return;const id=Number(card.dataset.id);const out=card.querySelector(".out");
-  if(b.classList.contains("commitBtn")){
-    try{const pred=u8(card.querySelector(".pred").value);const salt=DuelLib.randomSalt();
-      const h=DuelLib.commitmentHash(id,pred,salt,me);
-      const note={contract:CONTRACT,chainId:CHAIN_ID,id,player:me,prediction:pred,salt,commitment:h};
-      saveNote(note); // save BEFORE sending, so it can't be lost
-      const t=DuelLib.buildNote(note);
-      out.innerHTML=`<p><b>Save this reveal note now.</b> You need it to reveal; it is also saved in this browser.</p><pre>${esc(t)}</pre><button class="sec cp2">Copy</button><button class="sec dl2">Download</button>`;
-      out.querySelector(".cp2").onclick=async e=>{try{await navigator.clipboard.writeText(t);e.target.textContent="Copied"}catch{prompt("Copy:",t)}};
-      out.querySelector(".dl2").onclick=()=>download(note,t);
-      const ok=await send("Commit",c=>c.commit(id,h),null);
-      if(!ok)out.insertAdjacentHTML("afterbegin",'<p class="note">The commit did not go through; the note below is not active yet.</p>');
-    }catch(e){out.textContent=e.message;}
-  }
-  if(b.classList.contains("revealBtn")){
-    try{const n=DuelLib.parseNote(card.querySelector(".notein").value);if(!n)throw new Error("Could not read the note. Paste the full note.");
-      if(String(n.id)!==String(id))throw new Error("This note is for question #"+n.id+".");
-      await send("Reveal",c=>c.reveal(id,u8(n.prediction),n.salt),out);
-    }catch(e){out.textContent=e.message;}
-  }
-  if(b.classList.contains("resolveBtn")){
-    try{const o=u8(card.querySelector(".outc").value);await send("Resolve",c=>c.resolve(id,o),out);}catch(e){out.textContent=e.message;}
-  }
-});
-function download(n,t){const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([t],{type:"text/plain"}));a.download=`agent-duel-q${n.id}-reveal-note.txt`;document.body.appendChild(a);a.click();a.remove();}
-// default dates: +1h / +2h
-(function(){const f=h=>{const d=new Date(Date.now()+h*3600e3);d.setMinutes(d.getMinutes()-d.getTimezoneOffset());return d.toISOString().slice(0,16)};$("#cdl").value=f(24);$("#rdl").value=f(48);})();
-renderNotes();loadAll();
-})();
-</script></body></html>
+    const cd=toUnix[+3039 bytes at .content[1].resource.text]
